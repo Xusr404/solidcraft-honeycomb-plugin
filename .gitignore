@@ -1,0 +1,36 @@
+# Rust, WebAssembly and generated release packages
+/target/
+/dist/
+*.wasm
+*.wasm.map
+*.profraw
+*.profdata
+
+# Editor and machine-local settings
+/.idea/
+/.vscode/
+/.cargo/config
+/.cargo/config.toml
+.env
+.env.*
+*.code-workspace
+*.iml
+*.suo
+*.user
+
+# OS and archive metadata
+__MACOSX/
+.DS_Store
+._*
+Thumbs.db
+Desktop.ini
+
+# Temporary files and local logs
+*.log
+*.tmp
+*.bak
+*.orig
+*.swp
+*.swo
+*~
+__pycache__/

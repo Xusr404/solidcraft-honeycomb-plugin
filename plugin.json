@@ -1,0 +1,135 @@
+{
+  "id": "solidcraft-honeycomb",
+  "name": "Honeycomb & Hexagon Generator",
+  "version": "0.1.0",
+  "description": "Fill up to 250 cells across selected sketch regions. End the active tool with Esc and Shift-click regions before opening Honeycomb.",
+  "capabilities": [
+    "commands@0.1"
+  ],
+  "runtime": {
+    "module": "plugin.wasm",
+    "entries": [
+      {
+        "name": "generate",
+        "effect": "edit",
+        "input_schema": {
+          "type": "object",
+          "x-solidcraft-preview": "sketch-lines",
+          "additionalProperties": false,
+          "properties": {
+            "orientation": {
+              "type": "string",
+              "title": "Orientation",
+              "description": "Flat top has horizontal upper and lower edges. Pointy top has a vertex at the top.",
+              "enum": [
+                "Flat top",
+                "Pointy top"
+              ],
+              "default": "Flat top"
+            },
+            "across_flats_mm": {
+              "type": "number",
+              "title": "Hexagon size",
+              "description": "Distance between parallel sides of each hexagon.",
+              "unit": "mm",
+              "minimum": 0.2,
+              "maximum": 500,
+              "default": 10
+            },
+            "gap_mm": {
+              "type": "number",
+              "title": "Cell gap",
+              "description": "Edge-to-edge separation. Use 0.05 mm to four times the hexagon size.",
+              "unit": "mm",
+              "minimum": 0.05,
+              "maximum": 2000,
+              "default": 0.5
+            },
+            "rotation_deg": {
+              "type": "number",
+              "title": "Pattern rotation",
+              "description": "Rotates the hexagon grid inside the selected boundary.",
+              "unit": "deg",
+              "minimum": -180,
+              "maximum": 180,
+              "default": 0
+            },
+            "trim_cells_at_boundary": {
+              "type": "boolean",
+              "title": "Trim cells at boundary",
+              "description": "On keeps trimmed boundary cells. Off keeps only complete hexagons. Both use the same grid anchor and X/Y offsets. Trimmed edges are fixed at the current size and gap.",
+              "default": true
+            },
+            "anchor_mode": {
+              "type": "string",
+              "title": "Pattern anchor",
+              "description": "Center and Selected sketch point position a hexagon by its center. Corner anchors align a hexagon to both sides of the fill bounds when the shape allows it. A positive inset uses the inset bounds.",
+              "enum": [
+                "Center",
+                "Selected sketch point",
+                "Bottom left",
+                "Bottom right",
+                "Top left",
+                "Top right"
+              ],
+              "default": "Center"
+            },
+            "offset_x_mm": {
+              "type": "number",
+              "title": "Grid offset X",
+              "description": "Moves the grid to the right of its anchor in sketch coordinates. Use 0 mm for no X offset.",
+              "unit": "mm",
+              "minimum": 0,
+              "maximum": 2500,
+              "multipleOf": 0.01,
+              "default": 0
+            },
+            "offset_y_mm": {
+              "type": "number",
+              "title": "Grid offset Y",
+              "description": "Moves the grid up from its anchor in sketch coordinates. Use 0 mm for no Y offset.",
+              "unit": "mm",
+              "minimum": 0,
+              "maximum": 2500,
+              "multipleOf": 0.01,
+              "default": 0
+            },
+            "outline_inset_mm": {
+              "type": "number",
+              "title": "Inset width",
+              "description": "Use 0 mm for the original outline. Enter at least 0.01 mm to draw a closed inset outline and fill inside it.",
+              "unit": "mm",
+              "minimum": 0,
+              "maximum": 1000000,
+              "default": 0
+            }
+          },
+          "required": [
+            "across_flats_mm",
+            "gap_mm",
+            "orientation",
+            "rotation_deg"
+          ]
+        },
+        "slots": [
+          {
+            "kind": "menu",
+            "name": "Honeycomb"
+          }
+        ]
+      }
+    ],
+    "commands": [
+      "selection.get",
+      "sketch.inspect",
+      "parameters.list",
+      "parameters.add",
+      "sketch.line"
+    ],
+    "limits": {
+      "fuel": 200000000,
+      "memory_mib": 64,
+      "deadline_ms": 30000
+    }
+  }
+}

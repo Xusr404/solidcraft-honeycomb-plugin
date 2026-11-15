@@ -1,0 +1,153 @@
+name: Build SolidCraft plugin
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and package WebAssembly plugin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      WASM_TOOLS_VERSION: '1.263.0'
+      WASM_TOOLS_SHA256: 21c036c1740a0552124c79c6e2170cb61c5b016005671a6d5bc06cf642165431
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check package versions
+        id: metadata
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          def read(name):
+              return Path(name).read_text(encoding="utf-8")
+
+          crate = tomllib.loads(read("Cargo.toml"))["package"]
+          manifest = json.loads(read("plugin.json"))
+          lock = tomllib.loads(read("Cargo.lock"))
+          locked = [package["version"] for package in lock["package"]
+                    if package["name"] == crate["name"] and "source" not in package]
+
+          version = crate["version"]
+          if not re.fullmatch(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)", version):
+              raise SystemExit(f"Expected a major.minor.patch plugin version, got {version!r}")
+          if manifest["version"] != version or locked != [version]:
+              raise SystemExit("Cargo.toml, Cargo.lock and plugin.json must agree on the plugin version.")
+          if not re.search(rf"^## {re.escape(version)}$", read("CHANGELOG.md"), re.MULTILINE):
+              raise SystemExit(f"Missing changelog entry for {version}.")
+          if os.environ["GITHUB_REF_TYPE"] == "tag" and os.environ["GITHUB_REF_NAME"] != f"v{version}":
+              raise SystemExit(f"Release tag must be v{version}.")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"version={version}", file=output)
+          PY
+
+      - name: Install Rust and WebAssembly target
+        run: |
+          rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown
+          rustup default stable
+
+      - name: Cache Cargo registry downloads
+        if: github.ref_type != 'tag'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Run unit tests
+        run: cargo test --locked
+
+      - name: Build plugin
+        run: |
+          cargo_dir="${CARGO_HOME:-$HOME/.cargo}"
+          export CARGO_ENCODED_RUSTFLAGS="$(printf '%s\037%s' \
+            "--remap-path-prefix=$GITHUB_WORKSPACE=." "--remap-path-prefix=$cargo_dir=cargo")"
+          cargo build --locked --release --target wasm32-unknown-unknown
+
+      - name: Install verified wasm-tools
+        run: |
+          cd "$RUNNER_TEMP"
+          archive="wasm-tools-${WASM_TOOLS_VERSION}-x86_64-linux"
+          curl --fail --silent --show-error --location --retry 3 -o "$archive.tar.gz" \
+            "https://github.com/bytecodealliance/wasm-tools/releases/download/v${WASM_TOOLS_VERSION}/$archive.tar.gz"
+          printf '%s  %s\n' "$WASM_TOOLS_SHA256" "$archive.tar.gz" | sha256sum --check
+          tar -xzf "$archive.tar.gz" "$archive/wasm-tools"
+          printf '%s\n' "$RUNNER_TEMP/$archive" >> "$GITHUB_PATH"
+
+      - name: Package and validate plugin
+        run: bash scripts/package.sh
+
+      - name: Check the installable ZIP
+        run: |
+          python3 - <<'PY'
+          import re
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          plugin = "solidcraft-honeycomb"
+          with ZipFile(f"dist/{plugin}.zip") as archive:
+              if archive.testzip() is not None:
+                  raise SystemExit("Plugin ZIP failed its integrity check.")
+              if archive.read(f"{plugin}/plugin.json") != Path("plugin.json").read_bytes():
+                  raise SystemExit("Packaged manifest differs from the source manifest.")
+              component = archive.read(f"{plugin}/plugin.wasm")
+              if not component.startswith(b"\0asm\r\0\1\0"):
+                  raise SystemExit("Packaged WASM is not a WebAssembly component.")
+              local_path = rb"(?i)(?:[a-z]:[\\/](?:users|workspace)[\\/]|/(?:home|users)/)"
+              if re.search(local_path, component):
+                  raise SystemExit("Packaged WASM contains a machine-specific user path.")
+          PY
+
+      - name: Upload installable plugin package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: solidcraft-honeycomb-plugin
+          path: dist/solidcraft-honeycomb.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  release:
+    name: Publish GitHub release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    concurrency:
+      group: release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - name: Download verified plugin package
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: solidcraft-honeycomb-plugin
+          path: dist
+
+      - name: Create release with installable ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/solidcraft-honeycomb.zip \
+            --verify-tag --title "SolidCraft Honeycomb $VERSION" --generate-notes
